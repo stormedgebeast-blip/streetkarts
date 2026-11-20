@@ -1042,7 +1042,7 @@ class Game {
     this.renderer.info.reset();
     if (this.gpuLost) return;
     if (this.garage.active) this.garage.render(dt);
-    else { this.renderer.render(this.scene, this.camera); }
+    else { this.sketch.update(dt); this.sketch.render(this.scene, this.camera); }
   }
   // rebuild GPU-side resources (render targets, environment light) and re-apply settings
   recoverGPU() {
