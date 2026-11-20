@@ -314,6 +314,7 @@ body.marker #minimap { border-radius: 48% 52% 50% 50% / 51% 49% 52% 48%; border:
       <button data-go="garage" class="mbtn"><b>GARAGE</b><small>Customize vehicles</small></button>
       <button data-go="races" class="mbtn"><b>RACES</b><small>Street competitions</small></button>
       <button data-go="battles" class="mbtn"><b>BATTLES</b><small>Kart arena</small></button>
+      <button data-go="squad" class="mbtn primary"><b>SQUAD UP</b><small>11 modes · friends or bots</small></button>
       <button data-go="party" class="mbtn"><b>PARTY</b><small>Play with friends</small></button>
       <button data-go="profile" class="mbtn"><b>PROFILE</b><small>Stats and rank</small></button>
       <button data-go="settings" class="mbtn"><b>SETTINGS</b><small>Controls and graphics</small></button>
@@ -1539,6 +1540,78 @@ class UI {
 }
 
 // ---------------- boot + test hooks ----------------
+
+const SQUAD_MODES=[
+ ['tag','Tag','#ff637b','One driver is IT. Bump another kart to pass it on. Score while staying free.'],
+ ['infected','Infected','#77ed89','One infected driver starts the outbreak. Contact spreads it; survivors earn points.'],
+ ['ctf','Capture the Flag','#48cfff','Blue versus Orange. Steal the enemy flag and return it to your base.'],
+ ['demo','Demolition','#ff844c','Rockets, boost rams, respawns. Most knockouts wins.'],
+ ['team','Team Racing','#55baff','Race ordered checkpoints. Every teammate earns points for the team.'],
+ ['city','Free-Roam Rush','#ffe365','An open-city checkpoint challenge. Chain deliveries before time runs out.'],
+ ['potato','Hot Potato','#ffbd55','Pass the bomb by bumping another kart before its fuse expires.'],
+ ['hill','King of the Hill','#c391ff','Hold the glowing central zone. Contested zones award no points.'],
+ ['coins','Coin Rush','#ffd21f','Collect gold around the arena. Coins reappear after a short cooldown.'],
+ ['boost','Boost Circuit','#39e5e7','Checkpoint racing with unlimited boost. Precision beats panic.'],
+ ['survival','Last Kart Standing','#ff4d73','Three lives per driver. Lose them all and you are eliminated.']
+];
+class SquadMatch extends Battle {
+ constructor(g,id,opts={}){super(g,{...opts,duration:150,bots:5});this.squad=id;this.def=SQUAD_MODES.find(x=>x[0]===id)||SQUAD_MODES[0];this.extra=[];this.cool=0;this.snapT=0;this.fuse=15;this.teamScore=[0,0];}
+ get authority(){return !this.net||this.game.net?.isHost;}
+ start(){super.start();const g=this.game;this.players.forEach((p,i)=>{p.sid=p.id||'bot'+i;p.id=p.sid;p.name=p.name||p.k?.name||'Driver';p.team=this.net?this.net.players.indexOf(p.id)%2:i%2;p.lives=3;p.cp=0;p.infected=i===0;});this.it=0;
+ this.route=this.squad==='city'?[[0,-120],[120,-120],[120,0],[0,0],[0,120],[-120,120],[-120,0]]:[[ARENA.cx-45,ARENA.cz-40],[ARENA.cx+45,ARENA.cz-40],[ARENA.cx+45,ARENA.cz+40],[ARENA.cx-45,ARENA.cz+40]];
+ this.bases=[[ARENA.cx-52,ARENA.cz],[ARENA.cx+52,ARENA.cz]];this.flags=[{carrier:-1},{carrier:-1}];
+ const obj=(color,x,z,r=3)=>{const m=new THREE.Mesh(new THREE.CylinderGeometry(r,r,.35,20),new THREE.MeshBasicMaterial({color,transparent:true,opacity:.8}));m.position.set(x,g.world.ground(x,z)+.5,z);g.scene.add(m);this.extra.push(m);return m;};
+ if(this.squad==='ctf'){this.flagMeshes=this.bases.map(([x,z],i)=>obj(i?'#ff852e':'#38bbff',x,z));this.bases.forEach(([x,z],i)=>obj(i?'#ff852e':'#38bbff',x,z,7));}
+ if(this.squad==='hill')this.zone=obj('#bf8cff',ARENA.cx,ARENA.cz,15);
+ if(['team','boost','city'].includes(this.squad)){this.checks=this.route.map(([x,z])=>obj('#32edc4',x,z,4));if(this.squad==='city'){g.world.setArenaClosed(false);this.players.forEach((p,i)=>{if(p.k&&!p.remote)p.k.place(i*4,-35,Math.PI,g.world);});}}
+ if(this.squad==='coins')this.coins=Array.from({length:16},(_,i)=>{const a=i/16*Math.PI*2,x=ARENA.cx+Math.sin(a)*(i%2?48:28),z=ARENA.cz+Math.cos(a)*(i%2?48:28);return{m:obj('#ffd21f',x,z,1.7),t:0};});
+ this.badge=new THREE.Mesh(new THREE.ConeGeometry(1.4,2.4,6),new THREE.MeshBasicMaterial({color:'#ff3a67'}));g.scene.add(this.badge);this.extra.push(this.badge);g.ui.big(this.def[1].toUpperCase(),this.def[3]);
+ }
+ alive(p){return p&&p.k&&p.respawn<=0&&p.lives>0;}
+ idx(p){return this.players.indexOf(p);}
+ friendly(a,b){return ['ctf','team'].includes(this.squad)&&a&&b&&a.team===b.team;}
+ botGoal(p){const k=p.k,alive=this.players.filter(o=>o!==p&&this.alive(o));if(['team','boost','city'].includes(this.squad)){const [x,z]=this.route[p.cp%this.route.length];return{x,z};}if(this.squad==='hill')return{x:ARENA.cx,z:ARENA.cz};if(this.squad==='ctf'){const carrier=this.flags.findIndex(f=>f.carrier===this.idx(p)),base=this.bases[carrier>=0?p.team:1-p.team];return{x:base[0],z:base[1]};}if(this.squad==='coins'){const c=this.coins.filter(c=>c.t<=0).sort((a,b)=>k.pos.distanceToSquared(a.m.position)-k.pos.distanceToSquared(b.m.position))[0];if(c)return{x:c.m.position.x,z:c.m.position.z};}
+ const chase=this.squad==='infected'?p.infected:this.idx(p)===this.it;if(['tag','potato','infected'].includes(this.squad)&&alive.length){let target=alive.filter(o=>this.squad!=='infected'||o.infected!==p.infected).sort((a,b)=>k.pos.distanceToSquared(a.k.pos)-k.pos.distanceToSquared(b.k.pos))[0];if(target){if(chase)return{x:target.k.pos.x,z:target.k.pos.z};const dx=k.pos.x-target.k.pos.x,dz=k.pos.z-target.k.pos.z;return{x:clamp(k.pos.x+dx,ARENA.minX+12,ARENA.maxX-12),z:clamp(k.pos.z+dz,ARENA.minZ+12,ARENA.maxZ-12)};}}return null;}
+ interceptHit(v,a,how){if(!['demo','survival','ctf'].includes(this.squad))return 'blocked';if(this.friendly(v,a))return 'blocked';if(this.squad==='survival'&&v.lives<=0)return 'blocked';}
+ koPoints(){return this.squad==='ctf'?0:3;}
+ afterKO(v,a){if(this.squad==='survival'){v.lives=Math.max(0,v.lives-1);if(!v.lives)v.respawn=9999;}if(this.squad==='ctf')this.flags.forEach(f=>{if(f.carrier===this.idx(v))f.carrier=-1;});}
+ onKO(d){if(!this.authority||!['demo','survival','ctf'].includes(this.squad))return;const v=this.pById(d.victim),a=this.pById(d.by);if(a&&a!==v&&this.squad!=='ctf')a.score+=3;if(v)this.afterKO(v,a);}
+ onBump(a,b,rel){if(['demo','survival'].includes(this.squad))return super.onBump(a,b,rel);}
+ update(dt){
+ if(this.net&&!this.authority){super.update(dt);this.drawObjectives();return;}
+ super.update(dt);if(this.phase!=='fight')return;this.cool=Math.max(0,this.cool-dt);const live=this.players.filter(p=>this.alive(p));
+ if(this.squad==='boost')live.forEach(p=>p.k.boostMeter=100);
+ if(['tag','potato','infected'].includes(this.squad)){
+  if(this.squad==='tag')live.forEach(p=>{if(this.idx(p)!==this.it)p.score+=dt;});
+  if(this.squad==='infected')live.forEach(p=>{if(!p.infected)p.score+=dt;});
+  if(this.cool<=0){outer:for(let i=0;i<live.length;i++)for(let j=i+1;j<live.length;j++){const a=live[i],b=live[j];if(a.k.pos.distanceTo(b.k.pos)<a.k.radius+b.k.radius+1.7){if(this.squad==='infected'&&a.infected!==b.infected){const infected=a.infected?b:a;infected.infected=true;(a.infected?a:b).score+=15;this.cool=2;break outer;}if(this.squad!=='infected'&&(this.idx(a)===this.it||this.idx(b)===this.it)){this.it=this.idx(a)===this.it?this.idx(b):this.idx(a);this.cool=2;this.game.ui.toast('Tag passed to '+this.players[this.it].name,'hot');break outer;}}}}
+  if(this.squad==='infected'&&live.every(p=>p.infected)){live.forEach(p=>p.infected=false);this.players[(Math.random()*this.players.length)|0].infected=true;this.cool=3;this.game.ui.big('NEW OUTBREAK','Survive the next wave');}
+  if(this.squad==='potato'){this.fuse-=dt;if(this.fuse<=0){const p=this.players[this.it];p.score-=10;if(p.k){this.game.fx.burst(p.k.pos.x,p.k.pos.y+1,p.k.pos.z,new THREE.Color('#ff7722'),40,14);if(!p.remote){const spawn=this.spawns[this.it%8];p.k.place(...spawn,this.game.world);}}this.it=(this.it+1)%this.players.length;this.fuse=15;this.cool=3;}live.forEach(p=>{if(this.idx(p)!==this.it)p.score+=dt*.5;});}
+ }
+ if(['team','boost','city'].includes(this.squad))live.forEach(p=>{const t=this.route[p.cp%this.route.length];if(Math.hypot(p.k.pos.x-t[0],p.k.pos.z-t[1])<8){p.cp++;p.score+=10;if(p.k===this.game.player){this.game.audio.play('discover');this.game.ui.popup('CHECKPOINT +10','good');}}});
+ if(this.squad==='ctf'){this.flags.forEach((f,team)=>{if(f.carrier>=0){const p=this.players[f.carrier];if(!this.alive(p)){f.carrier=-1;return;}const home=this.bases[p.team];if(Math.hypot(p.k.pos.x-home[0],p.k.pos.z-home[1])<8&&this.flags[p.team].carrier<0){p.score+=50;this.teamScore[p.team]++;f.carrier=-1;this.game.ui.big('FLAG CAPTURED',(p.team?'ORANGE':'BLUE')+' TEAM SCORES');}}else{const base=this.bases[team],p=live.find(p=>p.team!==team&&Math.hypot(p.k.pos.x-base[0],p.k.pos.z-base[1])<7);if(p)f.carrier=this.idx(p);}});}
+ if(this.squad==='hill'){const inside=live.filter(p=>Math.hypot(p.k.pos.x-ARENA.cx,p.k.pos.z-ARENA.cz)<15);if(inside.length===1)inside[0].score+=dt*2;}
+ if(this.squad==='coins')for(const c of this.coins){c.t=Math.max(0,c.t-dt);if(c.t===0){const p=live.find(p=>p.k.pos.distanceTo(c.m.position)<4);if(p){p.score+=5;c.t=7;if(p.k===this.game.player)this.game.audio.play('discover');}}c.m.visible=c.t===0;}
+ if(this.squad==='survival'){live.forEach(p=>p.score+=dt*.05);if(live.length<=1){if(live[0])live[0].score+=50;this.finish();return;}const me=this.players[0];if(me.lives<=0)this.game.freeze=true;}
+ this.drawObjectives();this.snapT-=dt;if(this.net&&this.snapT<=0){this.snapT=.12;this.game.net.emit('squad-state',{ev:this.net.evId,s:this.snapshot()});}if(this.time<.6)this.finish();
+ }
+ snapshot(){return{players:this.players.map(p=>({id:p.id,score:p.score,cp:p.cp,lives:p.lives,infected:p.infected})),itId:this.players[this.it]?.id,fuse:this.fuse,flags:this.flags.map(f=>({carrierId:this.players[f.carrier]?.id||null})),teams:this.teamScore,time:this.time};}
+ apply(s){for(const d of s.players){const p=this.pById(d.id);if(p)Object.assign(p,d);}this.it=Math.max(0,this.players.findIndex(p=>p.id===s.itId));this.fuse=s.fuse;this.flags=s.flags.map(f=>({carrier:f.carrierId?this.players.findIndex(p=>p.id===f.carrierId):-1}));this.teamScore=s.teams;this.time=s.time;}
+ drawObjectives(){const p=this.players[this.it];this.badge.visible=['tag','potato','infected'].includes(this.squad)&&!!p?.k;if(p?.k)this.badge.position.copy(p.k.pos).add(new THREE.Vector3(0,5,0));if(this.flagMeshes)this.flagMeshes.forEach((m,i)=>{const p=this.players[this.flags[i].carrier],b=this.bases[i];m.position.set(p?.k?p.k.pos.x:b[0],p?.k?p.k.pos.y+3:1,p?.k?p.k.pos.z:b[1]);});if(this.checks){const me=this.players[0];this.checks.forEach((m,i)=>m.visible=i===me.cp%this.route.length);} }
+ hud(){const me=this.players[0];return{kind:'city',count:this.phase==='countdown'?Math.ceil(this.count-.5):null,boxes:[['SQUAD UP',this.def[1]],['TIME',Math.max(0,Math.ceil(this.time))],['POINTS',Math.floor(me.score),'hot'],...(this.squad==='ctf'?[['BLUE / ORANGE',this.teamScore.join(' / ')]]:this.squad==='team'?[['TEAM',me.team?'ORANGE':'BLUE']]:this.squad==='survival'?[['LIVES',me.lives]]:this.squad==='potato'?[['FUSE',Math.ceil(this.fuse)+'s'],['BOMB',this.players[this.it]?.name||'']]:this.squad==='tag'?[['IT',this.players[this.it]?.name||'']]:this.squad==='infected'?[['STATUS',me.infected?'INFECTED':'SURVIVOR']]:[])]};}
+ finishNet(){if(!this.authority)return;this.finish();}
+ finish(){if(this.finished)return;this.finished=true;this.phase='done';let rows=this.players.map(p=>({id:p.id,name:p.name,score:Math.floor(p.score),team:p.team}));if(['ctf','team'].includes(this.squad)){const total=this.squad==='ctf'?this.teamScore:[0,1].map(t=>rows.filter(p=>p.team===t).reduce((n,p)=>n+p.score,0));rows.forEach(p=>p.score=total[p.team]);}rows.sort((a,b)=>b.score-a.score);if(this.net)this.game.net.emit('squad-finish',{ev:this.net.evId,rows});this.results(rows);}
+ results(rows){this.phase='done';this.finished=true;const me=this.players[0],rank=rows.findIndex(p=>p.id===me.id),credits=rank===0?600:250;this.game.reward(credits,rank===0?250:100);this.game.audio.play(rank===0?'win':'lose');this.game.ui.results({title:rank===0?'SQUAD CHAMPION':'MATCH COMPLETE',sub:this.def[1]+(['ctf','team'].includes(this.squad)?' · team scores':''),credits,rows:rows.map((r,i)=>({pos:i+1,name:r.name,val:r.score+' PTS',me:r.id===me.id})),retry:this.net?null:()=>this.game.startMode(new SquadMatch(this.game,this.squad))});}
+ onLeft(id){const p=this.pById(id);if(p){p.lives=0;p.respawn=9999;}}
+ end(){for(const m of this.extra){this.game.scene.remove(m);m.geometry?.dispose();m.material?.dispose();}super.end();}
+}
+UI.prototype.p_squad=function(body){const g=this.g;const top=el('div','card','<h3>YOUR CREW. YOUR RULES.</h3><p>11 quick-play modes. Practice with bots, or host a room and invite friends. Team modes split drivers into Blue and Orange.</p>');const room=el('button','sbtn hot',g.net?'MANAGE ROOM · '+esc(g.net.code):'HOST / JOIN A ROOM');room.onclick=()=>this.panel('party');top.append(room);body.append(top);const cards=el('div','cards');for(const d of SQUAD_MODES){const c=el('div','card',`<div class="stripe" style="background:${d[2]}"></div><h3>${d[1]}</h3><p>${d[3]}</p><div class="meta"><span>2½ minute matches</span><span>${['ctf','team'].includes(d[0])?'TEAM PLAY':'PARTY PLAY'}</span></div>`);const solo=el('button','mbtn','<b>PRACTICE WITH BOTS</b>');solo.onclick=()=>{if(g.net){this.toast('Leave the room first to practice solo.');return;}this.hideAll();g.startMode(new SquadMatch(g,d[0]));};const multi=el('button','mbtn primary','<b>PLAY WITH SQUAD</b>');multi.onclick=()=>{if(!g.net){this.panel('party');return;}if(!g.net.isHost){this.toast('The room host picks the mode.');return;}if(!g.partyOthers()){this.toast('Share your room code and wait for a friend.');return;}g.enterCity(false);g.inviteRoom('battle','squad-'+d[0],{squad:d[0],duration:150});};c.append(solo,multi);cards.append(c);}body.append(cards);};
+const squadParty=UI.prototype.p_party;UI.prototype.p_party=function(body){const b=el('button','mbtn primary','<b>SQUAD UP</b><small>Choose a party mode</small>');b.onclick=()=>this.panel('squad');body.append(b);squadParty.call(this,body);};
+const squadPanel=UI.prototype.panel;UI.prototype.panel=function(which){squadPanel.call(this,which);if(which==='squad')$('#panel-title').textContent='SQUAD UP';};
+const squadStart=Game.prototype.startNetEvent;Game.prototype.startNetEvent=function(d){if(!d.opts?.squad)return squadStart.call(this,d);if(this.mode)this.endMode();this.ui.hideAll();this.startMode(new SquadMatch(this,d.opts.squad,{net:{evId:d.evId,players:d.players,goAt:d.goAt,names:d.names}}));};
+const squadName=Game.prototype.eventName;Game.prototype.eventName=function(kind,id){if(id?.startsWith('squad-'))return SQUAD_MODES.find(d=>d[0]===id.slice(6))?.[1]||'Squad Up';return squadName.call(this,kind,id);};
+const squadEvent=Game.prototype.onNetEvent;Game.prototype.onNetEvent=function(d){const m=this.mode;if(m instanceof SquadMatch&&d.ev===m.net?.evId&&this.net&&d.from===this.net.hostId){if(d.k==='squad-state'){if(!m.authority&&!m.finished)m.apply(d.s);return;}if(d.k==='squad-finish'){if(!m.authority&&!m.finished)m.results(d.rows);return;}}if(m instanceof SquadMatch&&d.k==='results')return;squadEvent.call(this,d);};
+
 const game = new Game();
 window.__game = game;
 game.init().catch(e => { console.error(e); $('#loadtext').textContent = 'Something went wrong while loading: ' + e.message; });
