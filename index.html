@@ -437,7 +437,7 @@ const $ = s => document.querySelector(s);
 const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const PROFILE_KEY = 'streetkarts_profile_v2';
-const SETTINGS_KEY = 'streetkarts_settings_v1';
+const SETTINGS_KEY = 'streetkarts_settings_v2';
 const readLocal = key => { try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (_) { return null; } };
 const ACHIEVEMENTS = [
   { id: 'first-race', name: 'First Finish', desc: 'Win your first street race', icon: '🏁', goal: 1, value: p => p.stats.racesWon, credits: 250, xp: 100 },
@@ -474,7 +474,7 @@ class Game {
     this.sun.shadow.bias = -0.0006; this.sun.shadow.normalBias = 0.6;
     this.headlight = new THREE.SpotLight('#fff3d0', 0, 70, 0.55, 0.5, 1.2); this.scene.add(this.headlight, this.headlight.target);
 
-    this.settings = { quality: 'auto', time: 'cycle', weather: 'auto', style: 'classic', cam: 'chase', master: 0.8, music: 0.35, sfx: 0.9, fps: true, touch: isTouch, turn: { urls: '', username: '', credential: '' } };
+    this.settings = { quality: 'auto', time: 'cycle', weather: 'auto', style: 'marker', cam: 'chase', master: 0.8, music: 0.35, sfx: 0.9, fps: true, touch: isTouch, turn: { urls: '', username: '', credential: '' } };
     const savedSettings = readLocal(SETTINGS_KEY);
     if (savedSettings && typeof savedSettings === 'object') this.settings = { ...this.settings, ...savedSettings, turn: { ...this.settings.turn, ...(savedSettings.turn || {}) } };
     this.evId = 0; this.cycleT = 0.08; this.net = null; this.publicCity = null;
@@ -601,7 +601,7 @@ class Game {
     
     this.traffic.setCount({ low: 10, medium: 18, high: 28 }[q]);
     this.fx.budget = q === 'low' ? 0.4 : 1;
-    this.sketch.enabled = false; document.body.classList.remove('marker');
+    { const marker = S.style === 'marker'; this.sketch.enabled = marker; document.body.classList.toggle('marker', marker); }
     if (S.time === 'cycle') this.world.cycleT = this.cycleT;
     this.world.setTime(S.time, this.sun, this.hemi, this.scene, R);
     this.lightBase = { sun: this.sun.intensity, hemi: this.hemi.intensity, fogFar: 520 };
@@ -1995,5 +1995,3 @@ window.render_game_to_text = () => {
 
 </script></body>
 </html>
-
-                
